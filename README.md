@@ -4,6 +4,34 @@ Build institutional applications with governed execution around AI-assisted deci
 
 Zensorum provides a developer-facing execution layer for applying institutional context, governance, authority, and AI recommendations to application actions.
 
+## The problem
+
+AI systems can generate recommendations, but an AI recommendation is not an institutional decision or an authorized action.
+
+Real-world institutions operate within context, policies, authority structures, changing conditions, existing systems, and accountability requirements. Turning an AI recommendation into an institutional action therefore requires more than AI reasoning alone.
+
+Zensorum provides the institutional execution layer around AI.
+
+## What Zensorum adds
+
+Zensorum continuously applies institutional context, inputs, governance, authority, and AI reasoning to decision-making and execution.
+
+The resulting execution model is:
+
+**Institution → Context → Inputs → AI Recommendation → Scenario → Governance → Authority → Decision → Execution → Evidence → History**
+
+This separates **AI reasoning** from **institutional authority and execution**.
+
+An AI system can recommend an action. Zensorum provides the governed boundary that determines whether that recommendation may proceed, executes the authorized application capability, and preserves the resulting execution state and history.
+
+## Governed execution
+
+Ordinary AI orchestration coordinates models, tools, and application calls.
+
+Zensorum adds an institutional governance boundary around those actions. Governance and authority are applied independently of the AI recommendation, and changing institutional conditions can cause an execution to be reevaluated.
+
+This allows applications to build systems in which AI contributes reasoning without becoming the source of execution authority.
+
 ## What you can build
 
 Applications can use the SDK to:
