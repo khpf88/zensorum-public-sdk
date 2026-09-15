@@ -1,0 +1,18 @@
+{
+  "name": "@zensorum/sdk",
+  "version": "0.1.0",
+  "description": "Developer SDK for building governed institutional applications with Zensorum.",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
