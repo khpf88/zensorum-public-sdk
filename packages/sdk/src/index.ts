@@ -60,11 +60,13 @@ export interface Capability<TInput = unknown> {
 
 export interface ExecutionRequest<
   TContext = unknown,
-  TRecommendation = unknown
+  TRecommendation = unknown,
+  TPayload = unknown
 > {
   readonly institution: Institution;
   readonly scenario: Scenario;
   readonly context: TContext;
+  readonly institutionalInputs?: readonly InstitutionalInput<TPayload>[];
   readonly aiInput: AIInput<TRecommendation>;
   readonly governance: Governance;
   readonly authority: Authority;
@@ -90,22 +92,27 @@ export interface ExecutionEvidence {
   readonly available: boolean;
 }
 
-export interface ExecutionResult {
+export interface ExecutionResult<TContext = unknown, TRecommendation = unknown> {
   readonly executionId: string;
   readonly institutionId: string;
   readonly scenarioId: string;
-  readonly context: unknown;
-  readonly aiInput: AIInput;
+  readonly context: TContext;
+  readonly aiInput: AIInput<TRecommendation>;
   readonly decision: ExecutionDecision;
   readonly action: ExecutionAction;
   readonly outcome: ExecutionOutcome;
   readonly evidence: ExecutionEvidence;
 }
 
-export interface ReevaluationRequest {
-  readonly execution: ExecutionResult;
-  readonly context: unknown;
-  readonly aiInput: AIInput;
+export interface ReevaluationRequest<
+  TContext = unknown,
+  TRecommendation = unknown,
+  TPayload = unknown
+> {
+  readonly execution: ExecutionResult<TContext, TRecommendation>;
+  readonly context: TContext;
+  readonly institutionalInputs?: readonly InstitutionalInput<TPayload>[];
+  readonly aiInput: AIInput<TRecommendation>;
   readonly governance: Governance;
   readonly authority: Authority;
   readonly capabilities: readonly Capability[];
@@ -118,13 +125,17 @@ export interface InstitutionalHistory {
 }
 
 export interface ZensorumClient {
-  execute<TContext = unknown, TRecommendation = unknown>(
-    request: ExecutionRequest<TContext, TRecommendation>
-  ): Promise<ExecutionResult>;
+  execute<TContext = unknown, TRecommendation = unknown, TPayload = unknown>(
+    request: ExecutionRequest<TContext, TRecommendation, TPayload>
+  ): Promise<ExecutionResult<TContext, TRecommendation>>;
 
-  reevaluate<TContext = unknown, TRecommendation = unknown>(
-    request: ReevaluationRequest
-  ): Promise<ExecutionResult>;
+  reevaluate<
+    TContext = unknown,
+    TRecommendation = unknown,
+    TPayload = unknown
+  >(
+    request: ReevaluationRequest<TContext, TRecommendation, TPayload>
+  ): Promise<ExecutionResult<TContext, TRecommendation>>;
 
   history(input: {
     institution: Institution;
@@ -187,7 +198,8 @@ function evaluateGovernance(
       typeof specification === "object" &&
       specification !== null &&
       "executionPermitted" in specification &&
-      (specification as { executionPermitted?: unknown }).executionPermitted === false
+      (specification as { executionPermitted?: unknown })
+        .executionPermitted === false
     ) {
       return {
         status: "blocked",
@@ -211,9 +223,8 @@ function evaluateGovernance(
         context !== null &&
         "operationalCondition" in context &&
         requiredCondition !==
-          (context as {
-            operationalCondition?: unknown;
-          }).operationalCondition
+          (context as { operationalCondition?: unknown })
+            .operationalCondition
       ) {
         return {
           status: "blocked",
@@ -238,13 +249,13 @@ function evaluateGovernance(
         typeof context === "object" &&
         context !== null &&
         "internalResponseCapacity" in context &&
-        (context as {
-          internalResponseCapacity?: unknown;
-        }).internalResponseCapacity !== "available"
+        (context as { internalResponseCapacity?: unknown })
+          .internalResponseCapacity !== "available"
       ) {
         return {
           status: "blocked",
-          reason: `Institutional context does not provide the required internal response capacity.`,
+          reason:
+            "Institutional context does not provide the required internal response capacity.",
         };
       }
     }
@@ -265,13 +276,13 @@ function evaluateGovernance(
         typeof context === "object" &&
         context !== null &&
         "externalResponseCapacity" in context &&
-        (context as {
-          externalResponseCapacity?: unknown;
-        }).externalResponseCapacity !== "available"
+        (context as { externalResponseCapacity?: unknown })
+          .externalResponseCapacity !== "available"
       ) {
         return {
           status: "blocked",
-          reason: `Institutional context does not provide the required external response capacity.`,
+          reason:
+            "Institutional context does not provide the required external response capacity.",
         };
       }
     }
@@ -279,21 +290,39 @@ function evaluateGovernance(
 
   return {
     status: "approved",
-    reason: "Execution satisfies the supplied institutional governance boundary.",
+    reason:
+      "Execution satisfies the supplied institutional governance boundary.",
   };
+}
+
+interface ExecutionMetadata {
+  readonly institution: Institution;
+  readonly scenario: Scenario;
+  readonly institutionalInputs: readonly InstitutionalInput[];
 }
 
 function createClient(): ZensorumClient {
   const executions: ExecutionResult[] = [];
+  const metadata = new Map<string, ExecutionMetadata>();
 
-  async function execute(
-    request: ExecutionRequest
-  ): Promise<ExecutionResult> {
+  async function execute<
+    TContext = unknown,
+    TRecommendation = unknown,
+    TPayload = unknown
+  >(
+    request: ExecutionRequest<TContext, TRecommendation, TPayload>
+  ): Promise<ExecutionResult<TContext, TRecommendation>> {
     const executionId = createExecutionId();
     const decision = evaluateGovernance(request);
 
+    metadata.set(executionId, {
+      institution: request.institution,
+      scenario: request.scenario,
+      institutionalInputs: request.institutionalInputs ?? [],
+    });
+
     if (decision.status !== "approved") {
-      const result: ExecutionResult = {
+      const result: ExecutionResult<TContext, TRecommendation> = {
         executionId,
         institutionId: request.institution.id,
         scenarioId: request.scenario.id,
@@ -318,7 +347,7 @@ function createClient(): ZensorumClient {
     const capability = request.capabilities[0];
 
     if (!capability) {
-      const result: ExecutionResult = {
+      const result: ExecutionResult<TContext, TRecommendation> = {
         executionId,
         institutionId: request.institution.id,
         scenarioId: request.scenario.id,
@@ -326,7 +355,8 @@ function createClient(): ZensorumClient {
         aiInput: request.aiInput,
         decision: {
           status: "blocked",
-          reason: "No application capability was supplied for governed execution.",
+          reason:
+            "No application capability was supplied for governed execution.",
         },
         action: {
           status: "not-executed",
@@ -344,9 +374,11 @@ function createClient(): ZensorumClient {
     }
 
     try {
-      const resultValue = await capability.execute(request.aiInput.recommendation);
+      const resultValue = await capability.execute(
+        request.aiInput.recommendation
+      );
 
-      const result: ExecutionResult = {
+      const result: ExecutionResult<TContext, TRecommendation> = {
         executionId,
         institutionId: request.institution.id,
         scenarioId: request.scenario.id,
@@ -369,7 +401,7 @@ function createClient(): ZensorumClient {
       executions.push(result);
       return result;
     } catch {
-      const result: ExecutionResult = {
+      const result: ExecutionResult<TContext, TRecommendation> = {
         executionId,
         institutionId: request.institution.id,
         scenarioId: request.scenario.id,
@@ -399,18 +431,34 @@ function createClient(): ZensorumClient {
     },
 
     async reevaluate(request) {
+      const original = metadata.get(request.execution.executionId);
+
+      if (!original) {
+        return execute({
+          institution: {
+            id: request.execution.institutionId,
+            name: request.execution.institutionId,
+          },
+          scenario: {
+            id: request.execution.scenarioId,
+            name: request.execution.scenarioId,
+            version: "unknown",
+            stages: [],
+          },
+          context: request.context,
+          institutionalInputs: request.institutionalInputs,
+          aiInput: request.aiInput,
+          governance: request.governance,
+          authority: request.authority,
+          capabilities: request.capabilities,
+        });
+      }
+
       return execute({
-        institution: {
-          id: request.execution.institutionId,
-          name: request.execution.institutionId,
-        },
-        scenario: {
-          id: request.execution.scenarioId,
-          name: request.execution.scenarioId,
-          version: "1.0",
-          stages: [],
-        },
+        institution: original.institution,
+        scenario: original.scenario,
         context: request.context,
+        institutionalInputs: request.institutionalInputs,
         aiInput: request.aiInput,
         governance: request.governance,
         authority: request.authority,
