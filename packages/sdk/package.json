@@ -3,11 +3,25 @@
   "version": "0.1.0",
   "description": "Developer SDK for building governed institutional applications with Zensorum.",
   "license": "Apache-2.0",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/khpf88/zensorum-public-sdk.git"
+  },
+  "homepage": "https://github.com/khpf88/zensorum-public-sdk",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit"
