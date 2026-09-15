@@ -37,6 +37,28 @@ export interface AIInput<TRecommendation = unknown> {
   readonly recommendation: TRecommendation;
 }
 
+export type PolicyConditionOperator =
+  | "eq"
+  | "neq"
+  | "lt"
+  | "lte"
+  | "gt"
+  | "gte";
+
+export interface PolicyCondition {
+  readonly path: string;
+  readonly operator: PolicyConditionOperator;
+  readonly value: string | number | boolean | null;
+}
+
+export interface PolicySpecification {
+  readonly all?: readonly PolicyCondition[];
+  readonly executionPermitted?: boolean;
+  readonly requiredCondition?: string;
+  readonly internalCapacityRequired?: boolean;
+  readonly externalCapacityRequired?: boolean;
+}
+
 export interface Policy {
   readonly id: string;
   readonly name: string;
@@ -182,6 +204,108 @@ function createExecutionId(): string {
     .slice(2, 10)}`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readContextValue(context: unknown, path: string): unknown {
+  if (!path) {
+    return undefined;
+  }
+
+  const segments = path.split(".");
+  let current: unknown = context;
+
+  for (const segment of segments) {
+    if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      return undefined;
+    }
+
+    current = current[segment];
+  }
+
+  return current;
+}
+
+function evaluateCondition(
+  context: unknown,
+  condition: PolicyCondition
+): boolean {
+  const actual = readContextValue(context, condition.path);
+
+  if (actual === undefined) {
+    return false;
+  }
+
+  switch (condition.operator) {
+    case "eq":
+      return actual === condition.value;
+
+    case "neq":
+      return actual !== condition.value;
+
+    case "lt":
+      return (
+        typeof actual === "number" &&
+        typeof condition.value === "number" &&
+        actual < condition.value
+      );
+
+    case "lte":
+      return (
+        typeof actual === "number" &&
+        typeof condition.value === "number" &&
+        actual <= condition.value
+      );
+
+    case "gt":
+      return (
+        typeof actual === "number" &&
+        typeof condition.value === "number" &&
+        actual > condition.value
+      );
+
+    case "gte":
+      return (
+        typeof actual === "number" &&
+        typeof condition.value === "number" &&
+        actual >= condition.value
+      );
+
+    default:
+      return false;
+  }
+}
+
+function evaluateContextualConditions(
+  context: unknown,
+  policyId: string,
+  conditions: readonly PolicyCondition[]
+): ExecutionDecision | undefined {
+  for (const condition of conditions) {
+    if (
+      !condition.path ||
+      !["eq", "neq", "lt", "lte", "gt", "gte"].includes(
+        condition.operator
+      )
+    ) {
+      return {
+        status: "blocked",
+        reason: `Invalid contextual governance condition in institutional policy '${policyId}'.`,
+      };
+    }
+
+    if (!evaluateCondition(context, condition)) {
+      return {
+        status: "blocked",
+        reason: `Institutional context does not satisfy policy '${policyId}' at '${condition.path}'.`,
+      };
+    }
+  }
+
+  return undefined;
+}
+
 function evaluateGovernance<
   TContext = unknown,
   TRecommendation = unknown,
@@ -206,12 +330,13 @@ function evaluateGovernance<
   for (const policy of request.governance.policies) {
     const specification = policy.specification;
 
+    if (!isRecord(specification)) {
+      continue;
+    }
+
     if (
-      typeof specification === "object" &&
-      specification !== null &&
       "executionPermitted" in specification &&
-      (specification as { executionPermitted?: unknown })
-        .executionPermitted === false
+      specification.executionPermitted === false
     ) {
       return {
         status: "blocked",
@@ -219,24 +344,37 @@ function evaluateGovernance<
       };
     }
 
-    if (
-      typeof specification === "object" &&
-      specification !== null &&
-      "requiredCondition" in specification
-    ) {
-      const requiredCondition = (
-        specification as { requiredCondition?: unknown }
-      ).requiredCondition;
+    if ("all" in specification) {
+      const conditions = specification.all;
 
-      const context = request.context;
+      if (!Array.isArray(conditions)) {
+        return {
+          status: "blocked",
+          reason: `Invalid contextual governance specification in institutional policy '${policy.id}'.`,
+        };
+      }
+
+      const contextualDecision = evaluateContextualConditions(
+        request.context,
+        policy.id,
+        conditions as PolicyCondition[]
+      );
+
+      if (contextualDecision) {
+        return contextualDecision;
+      }
+    }
+
+    if ("requiredCondition" in specification) {
+      const requiredCondition = specification.requiredCondition;
 
       if (
-        typeof context === "object" &&
-        context !== null &&
-        "operationalCondition" in context &&
-        requiredCondition !==
-          (context as { operationalCondition?: unknown })
-            .operationalCondition
+        isRecord(request.context) &&
+        Object.prototype.hasOwnProperty.call(
+          request.context,
+          "operationalCondition"
+        ) &&
+        requiredCondition !== request.context.operationalCondition
       ) {
         return {
           status: "blocked",
@@ -245,24 +383,15 @@ function evaluateGovernance<
       }
     }
 
-    if (
-      typeof specification === "object" &&
-      specification !== null &&
-      "internalCapacityRequired" in specification
-    ) {
-      const required = (
-        specification as { internalCapacityRequired?: unknown }
-      ).internalCapacityRequired;
-
-      const context = request.context;
-
+    if ("internalCapacityRequired" in specification) {
       if (
-        required === true &&
-        typeof context === "object" &&
-        context !== null &&
-        "internalResponseCapacity" in context &&
-        (context as { internalResponseCapacity?: unknown })
-          .internalResponseCapacity !== "available"
+        specification.internalCapacityRequired === true &&
+        isRecord(request.context) &&
+        Object.prototype.hasOwnProperty.call(
+          request.context,
+          "internalResponseCapacity"
+        ) &&
+        request.context.internalResponseCapacity !== "available"
       ) {
         return {
           status: "blocked",
@@ -272,24 +401,15 @@ function evaluateGovernance<
       }
     }
 
-    if (
-      typeof specification === "object" &&
-      specification !== null &&
-      "externalCapacityRequired" in specification
-    ) {
-      const required = (
-        specification as { externalCapacityRequired?: unknown }
-      ).externalCapacityRequired;
-
-      const context = request.context;
-
+    if ("externalCapacityRequired" in specification) {
       if (
-        required === true &&
-        typeof context === "object" &&
-        context !== null &&
-        "externalResponseCapacity" in context &&
-        (context as { externalResponseCapacity?: unknown })
-          .externalResponseCapacity !== "available"
+        specification.externalCapacityRequired === true &&
+        isRecord(request.context) &&
+        Object.prototype.hasOwnProperty.call(
+          request.context,
+          "externalResponseCapacity"
+        ) &&
+        request.context.externalResponseCapacity !== "available"
       ) {
         return {
           status: "blocked",
@@ -452,6 +572,7 @@ function createClient(): ZensorumClient {
 
   return {
     execute,
+
     async reevaluate(request) {
       const original = metadata.get(request.execution.executionId);
 
