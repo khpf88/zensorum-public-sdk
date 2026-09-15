@@ -70,11 +70,11 @@ export interface ExecutionRequest<
   readonly aiInput: AIInput<TRecommendation>;
   readonly governance: Governance;
   readonly authority: Authority;
-  readonly capabilities: readonly Capability[];
+  readonly capabilities: readonly Capability<TRecommendation>[];
 }
 
 export interface ExecutionDecision {
-  readonly status: "approved" | "blocked" | "escalated";
+  readonly status: "approved" | "blocked";
   readonly reason: string;
 }
 
@@ -92,7 +92,10 @@ export interface ExecutionEvidence {
   readonly available: boolean;
 }
 
-export interface ExecutionResult<TContext = unknown, TRecommendation = unknown> {
+export interface ExecutionResult<
+  TContext = unknown,
+  TRecommendation = unknown
+> {
   readonly executionId: string;
   readonly institutionId: string;
   readonly scenarioId: string;
@@ -102,6 +105,7 @@ export interface ExecutionResult<TContext = unknown, TRecommendation = unknown> 
   readonly action: ExecutionAction;
   readonly outcome: ExecutionOutcome;
   readonly evidence: ExecutionEvidence;
+  readonly previousExecutionId?: string;
 }
 
 export interface ReevaluationRequest<
@@ -115,7 +119,7 @@ export interface ReevaluationRequest<
   readonly aiInput: AIInput<TRecommendation>;
   readonly governance: Governance;
   readonly authority: Authority;
-  readonly capabilities: readonly Capability[];
+  readonly capabilities: readonly Capability<TRecommendation>[];
 }
 
 export interface InstitutionalHistory {
@@ -125,7 +129,11 @@ export interface InstitutionalHistory {
 }
 
 export interface ZensorumClient {
-  execute<TContext = unknown, TRecommendation = unknown, TPayload = unknown>(
+  execute<
+    TContext = unknown,
+    TRecommendation = unknown,
+    TPayload = unknown
+  >(
     request: ExecutionRequest<TContext, TRecommendation, TPayload>
   ): Promise<ExecutionResult<TContext, TRecommendation>>;
 
@@ -174,8 +182,12 @@ function createExecutionId(): string {
     .slice(2, 10)}`;
 }
 
-function evaluateGovernance(
-  request: ExecutionRequest
+function evaluateGovernance<
+  TContext = unknown,
+  TRecommendation = unknown,
+  TPayload = unknown
+>(
+  request: ExecutionRequest<TContext, TRecommendation, TPayload>
 ): ExecutionDecision {
   if (request.governance.policies.length === 0) {
     return {
@@ -310,7 +322,8 @@ function createClient(): ZensorumClient {
     TRecommendation = unknown,
     TPayload = unknown
   >(
-    request: ExecutionRequest<TContext, TRecommendation, TPayload>
+    request: ExecutionRequest<TContext, TRecommendation, TPayload>,
+    previousExecutionId?: string
   ): Promise<ExecutionResult<TContext, TRecommendation>> {
     const executionId = createExecutionId();
     const decision = evaluateGovernance(request);
@@ -338,6 +351,9 @@ function createClient(): ZensorumClient {
         evidence: {
           available: true,
         },
+        ...(previousExecutionId
+          ? { previousExecutionId }
+          : {}),
       };
 
       executions.push(result);
@@ -367,6 +383,9 @@ function createClient(): ZensorumClient {
         evidence: {
           available: true,
         },
+        ...(previousExecutionId
+          ? { previousExecutionId }
+          : {}),
       };
 
       executions.push(result);
@@ -396,6 +415,9 @@ function createClient(): ZensorumClient {
         evidence: {
           available: true,
         },
+        ...(previousExecutionId
+          ? { previousExecutionId }
+          : {}),
       };
 
       executions.push(result);
@@ -418,6 +440,9 @@ function createClient(): ZensorumClient {
         evidence: {
           available: true,
         },
+        ...(previousExecutionId
+          ? { previousExecutionId }
+          : {}),
       };
 
       executions.push(result);
@@ -426,15 +451,28 @@ function createClient(): ZensorumClient {
   }
 
   return {
-    async execute(request) {
-      return execute(request);
-    },
-
+    execute,
     async reevaluate(request) {
       const original = metadata.get(request.execution.executionId);
 
-      if (!original) {
-        return execute({
+      if (original) {
+        return execute(
+          {
+            institution: original.institution,
+            scenario: original.scenario,
+            context: request.context,
+            institutionalInputs: request.institutionalInputs,
+            aiInput: request.aiInput,
+            governance: request.governance,
+            authority: request.authority,
+            capabilities: request.capabilities,
+          },
+          request.execution.executionId
+        );
+      }
+
+      return execute(
+        {
           institution: {
             id: request.execution.institutionId,
             name: request.execution.institutionId,
@@ -451,19 +489,9 @@ function createClient(): ZensorumClient {
           governance: request.governance,
           authority: request.authority,
           capabilities: request.capabilities,
-        });
-      }
-
-      return execute({
-        institution: original.institution,
-        scenario: original.scenario,
-        context: request.context,
-        institutionalInputs: request.institutionalInputs,
-        aiInput: request.aiInput,
-        governance: request.governance,
-        authority: request.authority,
-        capabilities: request.capabilities,
-      });
+        },
+        request.execution.executionId
+      );
     },
 
     async history({ institution, scenario }) {
@@ -483,36 +511,34 @@ function createClient(): ZensorumClient {
 export function createZensorum(): Zensorum {
   return {
     institution(input) {
-      return Object.freeze({
+      return {
         id: input.id,
         name: input.name,
-      });
+      };
     },
 
     scenario(input) {
-      return Object.freeze({
+      return {
         id: input.id,
         name: input.name,
         version: input.version,
-        stages: Object.freeze([...input.stages]),
-      });
+        stages: [...input.stages],
+      };
     },
 
     governance(input) {
-      return Object.freeze({
-        policies: Object.freeze([...input.policies]),
-      });
+      return {
+        policies: [...input.policies],
+      };
     },
 
     authority(input) {
-      return Object.freeze({
+      return {
         id: input.id,
         name: input.name,
-      });
+      };
     },
 
-    client() {
-      return createClient();
-    },
+    client: createClient,
   };
 }
