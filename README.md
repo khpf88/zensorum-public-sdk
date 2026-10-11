@@ -213,12 +213,13 @@ See [examples/hello-world](./examples/hello-world).
 * [Getting Started](./docs/getting-started.md)
 * [Concepts](./docs/concepts.md)
 * [API Reference](./docs/api.md)
+* [Service-backed Client](./docs/service-client.md)
 
 ## Reference implementation
 
 The current SDK includes a minimal local reference implementation intended for development and demonstration.
 
-The public SDK contract is intentionally separated from Zensorum's private trusted execution infrastructure. The same public contract can be implemented by an independent service-backed client.
+The public SDK contract is intentionally separated from Zensorum's private trusted execution infrastructure. The local reference client is in-memory and intended for demos and tests. For integration with the existing platform HTTP endpoints, use the additive service client exported from `@zensorum/sdk/service`; see [Service-backed Client](./docs/service-client.md). Use it from a trusted backend until caller authentication and request-scoped authorization are verified at the platform or gateway boundary.
 
 ## Project status
 
