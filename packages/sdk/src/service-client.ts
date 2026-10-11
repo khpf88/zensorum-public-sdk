@@ -131,7 +131,15 @@ export function createZensorumServiceClient(options: ZensorumServiceClientOption
           "Zensorum service returned a non-JSON response.", response.status, endpoint, text,
         );
       }
-      if (!response.ok && !acceptedStatuses.includes(response.status)) {
+      const acceptedGovernedBlock =
+        endpoint === "/api/output/response" &&
+        response.status === 403 &&
+        isRecord(body) &&
+        body.released === false;
+      if (
+        !response.ok &&
+        !(acceptedStatuses.includes(response.status) && acceptedGovernedBlock)
+      ) {
         throw new ZensorumServiceError(
           endpointErrorMessage(body, response.status), response.status, endpoint, body,
         );
