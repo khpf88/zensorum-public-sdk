@@ -76,3 +76,24 @@ test("rejects invalid service URLs and empty request IDs", () => {
   assert.throws(() => client.evidence(" "), /requestId/);
   assert.throws(() => client.verifyReplay(""), /requestId/);
 });
+
+test("does not misclassify an unrelated HTTP 403 as a governed block", async () => {
+  const client = createZensorumServiceClient({
+    baseUrl: "https://zensorum.example.test",
+    fetch: async () => jsonResponse({ error: "Caller is not authorized." }, 403),
+  });
+  await assert.rejects(
+    () => client.executeGovernedResponse({
+      outputAdapterId: "consumer-web",
+      request: { actorId: "actor-1", inputAdapterId: "consumer-input", action: "restricted-action" },
+      policy: {},
+      authority: {},
+    }),
+    (error) => {
+      assert.ok(error instanceof ZensorumServiceError);
+      assert.equal(error.status, 403);
+      assert.equal(error.message, "Caller is not authorized.");
+      return true;
+    },
+  );
+});
